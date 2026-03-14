@@ -1,0 +1,66 @@
+name: Build Plugin
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PLUGIN_NAME: plugin-NoLobbyReservation
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check VERSION change
+        id: check
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          if git diff HEAD~1 -- VERSION | grep -q '^[+-][0-9]'; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download SourceMod compiler
+        run: |
+          wget -q "https://sm.alliedmods.net/smdrop/1.11/sourcemod-1.11.0-git6968-linux.tar.gz" -O sm.tar.gz
+          tar xzf sm.tar.gz
+          chmod +x addons/sourcemod/scripting/spcomp64
+
+      - name: Compile plugin
+        run: |
+          # The source file is in a deep path in this fork
+          addons/sourcemod/scripting/spcomp64 \
+            -i addons/sourcemod/scripting/include \
+            -i csgo/addons/sourcemod/scripting/include \
+            -o ${PLUGIN_NAME}.smx \
+            csgo/addons/sourcemod/scripting/nolobbyreservation.sp
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: "${{ env.PLUGIN_NAME }} v${{ needs.check-version.outputs.version }}"
+          files: |
+            ${{ env.PLUGIN_NAME }}.smx
+            csgo/addons/sourcemod/gamedata/nolobbyreservation.games.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
